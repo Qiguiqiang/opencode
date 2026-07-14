@@ -12,6 +12,7 @@ import {
   directoryAcceptKey,
   isDirectoryAutoAccepting,
   autoRespondsPermission,
+  AUTO_ACCEPT_RESPONSE,
 } from "./permission-auto-respond"
 
 type PermissionRespondFn = (input: {
@@ -126,7 +127,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
         })
     }
 
-    function respondOnce(permission: PermissionRequest, directory?: string) {
+    function respondAutomatically(permission: PermissionRequest, directory?: string) {
       const now = Date.now()
       const hit = responded.has(permission.id)
       responded.delete(permission.id)
@@ -136,7 +137,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       respond({
         sessionID: permission.sessionID,
         permissionID: permission.id,
-        response: "once",
+        response: AUTO_ACCEPT_RESPONSE,
         directory,
       })
     }
@@ -169,7 +170,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       const perm = event.properties
       if (!shouldAutoRespond(perm, e.name)) return
 
-      respondOnce(perm, e.name)
+      respondAutomatically(perm, e.name)
     })
     onCleanup(unsubscribe)
 
@@ -188,7 +189,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
           for (const perm of x.data ?? []) {
             if (!perm?.id) continue
             if (!shouldAutoRespond(perm, directory)) continue
-            respondOnce(perm, directory)
+            respondAutomatically(perm, directory)
           }
         })
         .catch(() => undefined)
@@ -221,7 +222,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
           for (const perm of x.data ?? []) {
             if (!perm?.id) continue
             if (!shouldAutoRespond(perm, directory)) continue
-            respondOnce(perm, directory)
+            respondAutomatically(perm, directory)
           }
         })
         .catch(() => undefined)

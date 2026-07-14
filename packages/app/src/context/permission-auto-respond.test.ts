@@ -14,6 +14,29 @@ const permission = (sessionID: string) =>
     sessionID,
   }) as Pick<PermissionRequest, "sessionID">
 
+describe("permission auto-response", () => {
+  test("persists approval for subsequent matching requests", () => {
+    expect(PermissionAutoRespond.AUTO_ACCEPT_RESPONSE).toBe("always")
+  })
+})
+
+describe("directory-scoped keys", () => {
+  test("normalizes Windows separators and trailing separators", () => {
+    expect(PermissionAutoRespond.acceptKey("ses_123", "F:\\augment\\project\\")).toBe(
+      PermissionAutoRespond.acceptKey("ses_123", "F:/augment/project"),
+    )
+    expect(PermissionAutoRespond.directoryAcceptKey("F:/augment/project/")).toBe(
+      PermissionAutoRespond.directoryAcceptKey("F:\\augment\\project"),
+    )
+  })
+
+  test("keeps a Windows drive root intact", () => {
+    expect(PermissionAutoRespond.directoryAcceptKey("F:\\")).toBe(
+      PermissionAutoRespond.directoryAcceptKey("F:/"),
+    )
+  })
+})
+
 describe("autoRespondsPermission", () => {
   test("uses a parent session's directory-scoped auto-accept", () => {
     const directory = "/tmp/project"
@@ -102,6 +125,16 @@ describe("isDirectoryAutoAccepting", () => {
     const directory = "/tmp/project"
     const autoAccept = { [`${base64Encode(directory)}/*`]: false }
     expect(PermissionAutoRespond.isDirectoryAutoAccepting(autoAccept, directory)).toBe(false)
+  })
+
+  test("reads a historical backslash key through a forward-slash directory", () => {
+    const autoAccept = { [`${base64Encode("F:\\augment\\project")}/*`]: true }
+    expect(PermissionAutoRespond.isDirectoryAutoAccepting(autoAccept, "F:/augment/project")).toBe(true)
+  })
+
+  test("reads a historical trailing-slash key through a normalized directory", () => {
+    const autoAccept = { [`${base64Encode("F:/augment/project/")}/*`]: true }
+    expect(PermissionAutoRespond.isDirectoryAutoAccepting(autoAccept, "F:\\augment\\project")).toBe(true)
   })
 })
 
