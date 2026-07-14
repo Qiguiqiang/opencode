@@ -39,6 +39,9 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
+> [!IMPORTANT]
+> 本仓库的 `custom-web-1.17.18` 分支包含非官方 OpenCode Web 改进，包括会话内容按需加载、项目名称与路径列表、常用项目排序、可拖动悬浮项目切换，以及最新 UI 自动授权修复。使用和兼容性说明见 [OpenCode Web 自定义版本说明](CUSTOM_WEB_CHANGES.md)。
+
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---
