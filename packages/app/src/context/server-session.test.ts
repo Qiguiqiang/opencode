@@ -178,6 +178,16 @@ describe("server session", () => {
     expect(ctx.store.data.message.root).toEqual([])
   })
 
+  test("resolves session metadata without loading messages", async () => {
+    const ctx = setup({ root: session("root") })
+
+    await ctx.store.sync("root", { loadMessages: false })
+
+    expect(ctx.get).toEqual([{ sessionID: "root" }])
+    expect(ctx.messages).toEqual([])
+    expect(ctx.store.data.message.root).toBeUndefined()
+  })
+
   test("backfills an assistant-only initial page through its user root", async () => {
     const user = userMessage("message-1")
     const assistants = [assistantMessage("message-2", user.id), assistantMessage("message-3", user.id)]

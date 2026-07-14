@@ -101,8 +101,6 @@ const SessionRow = (props: {
   unseenCount: Accessor<number>
   clearHoverProjectSoon: () => void
   sidebarOpened: Accessor<boolean>
-  warmPress: () => void
-  warmFocus: () => void
 }): JSX.Element => {
   const title = () => sessionTitle(props.session.title)
 
@@ -110,8 +108,6 @@ const SessionRow = (props: {
     <A
       href={`/${props.slug}/session/${props.session.id}`}
       class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
-      onPointerDown={props.warmPress}
-      onFocus={props.warmFocus}
       onClick={() => {
         if (props.sidebarOpened()) return
         props.clearHoverProjectSoon()
@@ -152,7 +148,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   const serverSync = useServerSync()
   const unseenCount = createMemo(() => notification.session.unseenCount(props.session.id))
   const hasError = createMemo(() => notification.session.unseenHasError(props.session.id))
-  const [sessionStore] = serverSync().child(props.session.directory)
+  const [sessionStore] = serverSync().child(props.session.directory, { bootstrap: false })
   const hasPermissions = createMemo(() => {
     return !!sessionPermissionRequest(
       sessionStore.session,
@@ -177,26 +173,6 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
     return childSessionOnPath(sessionStore.session, props.session.id, params.id)
   })
 
-  const warm = (span: number, priority: "high" | "low") => {
-    const nav = props.navList?.()
-    const list = nav?.some((item) => item.id === props.session.id && item.directory === props.session.directory)
-      ? nav
-      : props.list
-
-    props.prefetchSession(props.session, priority)
-
-    const idx = list.findIndex((item) => item.id === props.session.id && item.directory === props.session.directory)
-    if (idx === -1) return
-
-    for (let step = 1; step <= span; step++) {
-      const next = list[idx + step]
-      if (next) props.prefetchSession(next, step === 1 ? "high" : priority)
-
-      const prev = list[idx - step]
-      if (prev) props.prefetchSession(prev, step === 1 ? "high" : priority)
-    }
-  }
-
   const item = (
     <SessionRow
       session={props.session}
@@ -210,8 +186,6 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       unseenCount={unseenCount}
       clearHoverProjectSoon={props.clearHoverProjectSoon}
       sidebarOpened={layout.sidebar.opened}
-      warmPress={() => warm(2, "high")}
-      warmFocus={() => warm(2, "high")}
     />
   )
 

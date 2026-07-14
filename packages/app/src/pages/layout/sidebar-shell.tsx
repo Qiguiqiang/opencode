@@ -9,6 +9,7 @@ import {
 } from "@thisbeyond/solid-dnd"
 import { ConstrainDragXAxis } from "@/utils/solid-dnd"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Button } from "@opencode-ai/ui/button"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { type LocalProject } from "@/context/layout"
 
@@ -33,8 +34,31 @@ export const SidebarContent = (props: {
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
-  const placement = () => (props.mobile ? "bottom" : "right")
+  const placement = () => (expanded() ? "top" : "right")
   let panel: HTMLDivElement | undefined
+
+  const globalActions = () => (
+    <>
+      <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
+        <IconButton
+          icon="settings-gear"
+          variant="ghost"
+          size="large"
+          onClick={props.onOpenSettings}
+          aria-label={props.settingsLabel()}
+        />
+      </TooltipKeybind>
+      <Tooltip placement={placement()} value={props.helpLabel()}>
+        <IconButton
+          icon="help"
+          variant="ghost"
+          size="large"
+          onClick={props.onOpenHelp}
+          aria-label={props.helpLabel()}
+        />
+      </Tooltip>
+    </>
+  )
 
   createEffect(() => {
     const el = panel
@@ -47,10 +71,19 @@ export const SidebarContent = (props: {
   })
 
   return (
-    <div class="flex h-full w-full min-w-0 overflow-hidden">
+    <div
+      classList={{
+        "flex h-full w-full min-w-0 overflow-hidden": true,
+        "flex-col": expanded(),
+      }}
+    >
       <div
         data-component="sidebar-rail"
-        class="w-16 shrink-0 bg-background-base flex flex-col items-center overflow-hidden"
+        classList={{
+          "shrink-0 bg-background-base flex flex-col overflow-hidden": true,
+          "w-16 h-full items-center": !expanded(),
+          "w-full max-h-[38%] min-h-40 border-b border-border-weaker-base": expanded(),
+        }}
         onMouseMove={props.aimMove}
       >
         <div class="flex-1 min-h-0 w-full">
@@ -62,53 +95,57 @@ export const SidebarContent = (props: {
           >
             <DragDropSensors />
             <ConstrainDragXAxis />
-            <div class="h-full w-full flex flex-col items-center gap-3 px-3 py-3 overflow-y-auto no-scrollbar">
+            <div
+              classList={{
+                "h-full w-full flex flex-col overflow-y-auto no-scrollbar": true,
+                "items-center gap-3 px-3 py-3": !expanded(),
+                "gap-1 px-2 py-2": expanded(),
+              }}
+            >
               <SortableProvider ids={props.projects().map((p) => p.worktree)}>
                 <For each={props.projects()}>{(project) => props.renderProject(project)}</For>
               </SortableProvider>
-              <Tooltip
-                placement={placement()}
-                value={
-                  <div class="flex items-center gap-2">
-                    <span>{props.openProjectLabel}</span>
-                    <Show when={!props.mobile && !!props.openProjectKeybind()}>
-                      <span class="text-icon-base text-12-medium">{props.openProjectKeybind()}</span>
-                    </Show>
-                  </div>
+              <Show
+                when={expanded()}
+                fallback={
+                  <Tooltip
+                    placement={placement()}
+                    value={
+                      <div class="flex items-center gap-2">
+                        <span>{props.openProjectLabel}</span>
+                        <Show when={!props.mobile && !!props.openProjectKeybind()}>
+                          <span class="text-icon-base text-12-medium">{props.openProjectKeybind()}</span>
+                        </Show>
+                      </div>
+                    }
+                  >
+                    <IconButton
+                      icon="plus"
+                      variant="ghost"
+                      size="large"
+                      onClick={props.onOpenProject}
+                      aria-label={typeof props.openProjectLabel === "string" ? props.openProjectLabel : undefined}
+                    />
+                  </Tooltip>
                 }
               >
-                <IconButton
-                  icon="plus"
+                <Button
+                  icon="plus-small"
                   variant="ghost"
-                  size="large"
+                  class="w-full justify-start text-text-base"
                   onClick={props.onOpenProject}
                   aria-label={typeof props.openProjectLabel === "string" ? props.openProjectLabel : undefined}
-                />
-              </Tooltip>
+                >
+                  {props.openProjectLabel}
+                </Button>
+              </Show>
             </div>
             <DragOverlay>{props.renderProjectOverlay()}</DragOverlay>
           </DragDropProvider>
         </div>
-        <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
-          <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
-            <IconButton
-              icon="settings-gear"
-              variant="ghost"
-              size="large"
-              onClick={props.onOpenSettings}
-              aria-label={props.settingsLabel()}
-            />
-          </TooltipKeybind>
-          <Tooltip placement={placement()} value={props.helpLabel()}>
-            <IconButton
-              icon="help"
-              variant="ghost"
-              size="large"
-              onClick={props.onOpenHelp}
-              aria-label={props.helpLabel()}
-            />
-          </Tooltip>
-        </div>
+        <Show when={!expanded()}>
+          <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">{globalActions()}</div>
+        </Show>
       </div>
 
       <div
@@ -120,6 +157,12 @@ export const SidebarContent = (props: {
       >
         {props.renderPanel()}
       </div>
+
+      <Show when={expanded()}>
+        <div class="shrink-0 w-full px-3 py-2 border-t border-border-weaker-base flex items-center justify-end gap-1">
+          {globalActions()}
+        </div>
+      </Show>
     </div>
   )
 }

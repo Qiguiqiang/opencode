@@ -689,16 +689,18 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     }
   }
 
-  const sync = (sessionID: string, options?: { force?: boolean; messageLimit?: number }) => {
+  const sync = (sessionID: string, options?: { force?: boolean; messageLimit?: number; loadMessages?: boolean }) => {
     touch(sessionID)
     return runInflight(inflight, sessionID, async () => {
       const cached = data.message[sessionID] !== undefined && meta.limit[sessionID] !== undefined
       if (cached && data.info[sessionID] && !options?.force) return
       await Promise.all([
         resolve(sessionID, options),
-        cached && !options?.force
+        options?.loadMessages === false
           ? Promise.resolve()
-          : loadMessages(sessionID, options?.messageLimit ?? meta.limit[sessionID] ?? initialMessagePageSize),
+          : cached && !options?.force
+            ? Promise.resolve()
+            : loadMessages(sessionID, options?.messageLimit ?? meta.limit[sessionID] ?? initialMessagePageSize),
       ])
     })
   }

@@ -20,6 +20,19 @@ export function isDirectoryAutoAccepting(autoAccept: Record<string, boolean>, di
   return autoAccept[key] ?? false
 }
 
+export function permissionSettingsTarget(input: {
+  sessionID?: string
+  sessionDirectory?: string
+  selectedDirectory?: string
+}) {
+  if (input.sessionID) {
+    if (!input.sessionDirectory) return
+    return { sessionID: input.sessionID, directory: input.sessionDirectory }
+  }
+  if (!input.selectedDirectory) return
+  return { directory: input.selectedDirectory }
+}
+
 function sessionLineage(session: { id: string; parentID?: string }[], sessionID: string) {
   const parent = session.reduce((acc, item) => {
     if (item.parentID) acc.set(item.id, item.parentID)

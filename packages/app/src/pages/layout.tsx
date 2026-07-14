@@ -82,6 +82,7 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { RoutedFloatingProjectSwitch } from "./home"
 
 export default function LegacyLayout(props: ParentProps) {
   const serverSDK = useServerSDK()
@@ -775,21 +776,6 @@ export default function LegacyLayout(props: ParentProps) {
       if (prev) prefetchSession(prev, offset === 1 ? "high" : "low")
     }
   }
-
-  createEffect(() => {
-    const sessions = currentSessions()
-    if (sessions.length === 0) return
-
-    const index = params.id ? sessions.findIndex((s) => s.id === params.id) : 0
-    if (index === -1) return
-
-    if (!params.id) {
-      const first = sessions[index]
-      if (first) prefetchSession(first, "high")
-    }
-
-    warm(sessions, index)
-  })
 
   function navigateSessionByOffset(offset: number) {
     const sessions = currentSessions()
@@ -2397,6 +2383,7 @@ export default function LegacyLayout(props: ParentProps) {
       </div>
       <TabsInfoPopup />
       <HelpButton />
+      <RoutedFloatingProjectSwitch routeMode="legacy" directory={currentDir()} />
       <ToastRegion v2={false} />
     </div>
   )

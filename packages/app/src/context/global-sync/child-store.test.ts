@@ -206,6 +206,12 @@ describe("createChildStoreManager", () => {
       if (!resourceQuery) throw new Error("resource query required")
       expect(query().enabled).toBe(false)
       expect(resourceQuery().enabled).toBe(false)
+      expect(
+        querySingles
+          .slice(offset)
+          .filter((item) => item().queryKey?.[1] !== "mcp" && item().queryKey?.[1] !== "mcpResources")
+          .every((item) => item().enabled === false),
+      ).toBe(true)
 
       setStore("status", "complete")
       manager.child("/project", { bootstrap: false, mcp: true })

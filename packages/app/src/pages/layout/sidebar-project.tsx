@@ -11,7 +11,7 @@ import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { ProjectIcon, SessionItem, type SessionItemProps } from "./sidebar-items"
-import { displayName, sortedRootSessions } from "./helpers"
+import { compactProjectPath, displayName, sortedRootSessions } from "./helpers"
 
 export type ProjectSidebarContext = {
   currentDir: Accessor<string>
@@ -53,6 +53,7 @@ export const ProjectDragOverlay = (props: {
 const ProjectTile = (props: {
   project: LocalProject
   mobile?: boolean
+  expanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   selected: Accessor<boolean>
   active: Accessor<boolean>
@@ -101,11 +102,17 @@ const ProjectTile = (props: {
         data-action="project-switch"
         data-project={base64Encode(props.project.worktree)}
         classList={{
-          "flex items-center justify-center size-10 p-1 rounded-lg overflow-hidden transition-colors cursor-default": true,
-          "bg-transparent border-2 border-icon-strong-base hover:bg-surface-base-hover": props.selected(),
+          "relative flex items-center overflow-hidden transition-colors cursor-default": true,
+          "justify-center size-10 p-1 rounded-lg": !props.expanded(),
+          "w-full min-h-14 gap-3 px-3 py-2 rounded-md text-left border-l-2": props.expanded(),
+          "bg-transparent border-2 border-icon-strong-base hover:bg-surface-base-hover":
+            !props.expanded() && props.selected(),
           "bg-transparent border border-transparent hover:bg-surface-base-hover hover:border-border-weak-base":
-            !props.selected() && !props.active(),
-          "bg-surface-base-hover border border-border-weak-base": !props.selected() && props.active(),
+            !props.expanded() && !props.selected() && !props.active(),
+          "bg-surface-base-hover border border-border-weak-base":
+            !props.expanded() && !props.selected() && props.active(),
+          "bg-surface-base-hover border-icon-strong-base": props.expanded() && props.selected(),
+          "bg-transparent border-transparent hover:bg-surface-base-hover": props.expanded() && !props.selected(),
         }}
         onPointerDown={(event) => {
           if (event.button === 0 && !event.ctrlKey) {
@@ -145,6 +152,17 @@ const ProjectTile = (props: {
         onBlur={() => props.setOpen(false)}
       >
         <ProjectIcon project={props.project} notify working={props.isWorking()} />
+        <Show when={props.expanded()}>
+          <span class="min-w-0 grow flex flex-col gap-0.5">
+            <span class="text-14-medium text-text-strong truncate">{displayName(props.project)}</span>
+            <span class="text-12-regular text-text-weak truncate" title={props.project.worktree}>
+              {compactProjectPath(props.project.worktree)}
+            </span>
+          </span>
+          <Show when={props.selected()}>
+            <Icon name="check" size="small" class="shrink-0 text-icon-strong" />
+          </Show>
+        </Show>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content>
@@ -319,6 +337,7 @@ export const SortableProject = (props: {
     <ProjectTile
       project={props.project}
       mobile={props.mobile}
+      expanded={() => !!props.mobile || props.ctx.sidebarOpened()}
       sidebarHovering={props.ctx.sidebarHovering}
       selected={selected}
       active={active}
@@ -343,7 +362,13 @@ export const SortableProject = (props: {
 
   return (
     // @ts-ignore
-    <div use:sortable classList={{ "opacity-30": sortable.isActiveDraggable }}>
+    <div
+      use:sortable
+      classList={{
+        "w-full": !!props.mobile || props.ctx.sidebarOpened(),
+        "opacity-30": sortable.isActiveDraggable,
+      }}
+    >
       <Show when={preview() && !selected()} fallback={tile()}>
         <HoverCard
           open={!state.suppressHover && hoverOpen() && !state.menu}

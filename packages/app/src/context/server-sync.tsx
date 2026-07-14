@@ -26,7 +26,7 @@ import {
 } from "./global-sync/bootstrap"
 import { createChildStoreManager } from "./global-sync/child-store"
 import { applyDirectoryEvent, applyGlobalEvent } from "./global-sync/event-reducer"
-import { estimateRootSessionTotal, loadRootSessionsWithFallback } from "./global-sync/session-load"
+import { estimateRootSessionTotal, loadRootSessionsWithFallback, rootSessionRequestLimit } from "./global-sync/session-load"
 import { trimSessions } from "./global-sync/session-trim"
 import type { ProjectMeta } from "./global-sync/types"
 import { SESSION_RECENT_LIMIT } from "./global-sync/types"
@@ -248,7 +248,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     },
   })
 
-  async function loadSessions(directory: string, options?: { limit?: number }) {
+  async function loadSessions(directory: string, options?: { limit?: number; exact?: boolean }) {
     const key = directoryKey(directory)
     const pending = sessionLoads.get(key)
     if (pending) {
@@ -272,7 +272,11 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       return
     }
 
-    const limit = Math.max(retainedLimit + SESSION_RECENT_LIMIT, SESSION_RECENT_LIMIT)
+    const limit = rootSessionRequestLimit({
+      retained: retainedLimit,
+      recent: SESSION_RECENT_LIMIT,
+      exact: options?.exact,
+    })
     const promise = queryClient
       .fetchQuery({
         ...queryOptionsApi.sessions(key),
