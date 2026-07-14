@@ -10,6 +10,7 @@ import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
   childSessionOnPath,
   closeHomeProject,
+  compactProjectPath,
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
@@ -224,6 +225,21 @@ describe("layout workspace helpers", () => {
     expect(displayName({ worktree: "/tmp/app" })).toBe("app")
     expect(displayName({ worktree: "/tmp/app", name: "My App" })).toBe("My App")
     expect(displayName({ worktree: "/" })).toBe("/")
+  })
+
+  test("keeps short project paths readable", () => {
+    expect(compactProjectPath("F:\\augment\\opencodenetwork")).toBe("F:/augment/opencodenetwork")
+    expect(compactProjectPath("/srv/opencodenetwork")).toBe("/srv/opencodenetwork")
+  })
+
+  test("keeps the root and final segments of long project paths", () => {
+    expect(compactProjectPath("F:\\Users\\sura\\augment\\opencodenetwork")).toBe("F:/.../augment/opencodenetwork")
+    expect(compactProjectPath("/Users/sura/augment/opencodenetwork")).toBe("/.../augment/opencodenetwork")
+  })
+
+  test("preserves project path roots", () => {
+    expect(compactProjectPath("C:\\")).toBe("C:/")
+    expect(compactProjectPath("/")).toBe("/")
   })
 
   test("scopes home project selection by server", () => {

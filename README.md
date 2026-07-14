@@ -39,6 +39,9 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
+> [!IMPORTANT]
+> The `custom-web-1.17.20` branch contains unofficial OpenCode Web changes for on-demand session loading, identifiable project lists, frequently used project ranking, a draggable project switcher, and the latest UI auto-accept permission fix. See [Custom Web changes](CUSTOM_WEB_CHANGES.md) before building or deploying it.
+
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---

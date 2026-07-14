@@ -1,5 +1,10 @@
 import type { RootLoadArgs } from "./types"
 
+export function rootSessionRequestLimit(input: { retained: number; recent: number; exact?: boolean }) {
+  if (input.exact) return input.retained
+  return Math.max(input.retained + input.recent, input.recent)
+}
+
 export async function loadRootSessionsWithFallback(input: RootLoadArgs) {
   try {
     const result = await input.list({ directory: input.directory, roots: true, limit: input.limit })

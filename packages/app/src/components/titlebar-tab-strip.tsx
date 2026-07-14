@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, createRoot, For, onCleanup, onMount } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, onMount } from "solid-js"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable, useSortable } from "@dnd-kit/solid/sortable"
@@ -50,25 +50,6 @@ function SessionTabSlot(props: {
   )
   const session = createMemo(() => cachedSession() ?? loadedSession())
   const missingSession = createMemo(() => !!props.serverCtx() && !loadedSession.loading && !session())
-  let prefetched = false
-
-  createEffect(() => {
-    const ctx = props.serverCtx()
-    const value = session()
-    if (!ctx || !value || prefetched) return
-    prefetched = true
-    createRoot((dispose) => {
-      try {
-        void ctx.sync
-          .ensureDirSyncContext(value.directory)
-          .session.sync(value.id)
-          .catch(() => {})
-          .finally(dispose)
-      } catch {
-        dispose()
-      }
-    })
-  })
 
   createEffect(() => {
     const value = session()

@@ -1707,7 +1707,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </div>
               </div>
               <div class="flex h-11 items-center px-2">
-                <div class="flex min-w-0 flex-1 items-center gap-1">
+                <div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                   {fileAttachmentInput()}
                   <TooltipV2
                     placement="top"
@@ -1826,7 +1826,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     tabIndex={store.mode === "normal" ? undefined : -1}
                     icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                     variant="primary"
-                    class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+                    class="size-7 shrink-0 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
                     style={{
                       "background-image":
                         "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
@@ -2201,7 +2201,7 @@ type ComposerModelControlState = {
 
 function ComposerAgentControl(props: { state: ComposerAgentControlState }) {
   return (
-    <div class="relative">
+    <div class="relative min-w-0 shrink">
       <div class="pointer-events-none absolute left-2 top-1/2 z-10 flex size-4 -translate-y-1/2 items-center justify-center text-v2-icon-icon-muted">
         <Icon name="sliders" size="small" />
       </div>
@@ -2220,7 +2220,7 @@ function ComposerAgentControl(props: { state: ComposerAgentControlState }) {
           options={props.state.options}
           current={props.state.current}
           onSelect={props.state.onSelect}
-          class="max-w-[175px] justify-start text-v2-text-text-faint [&_[data-component=icon]]:text-v2-icon-icon-muted"
+          class="max-w-[96px] justify-start text-v2-text-text-faint sm:max-w-[175px] [&_[data-component=icon]]:text-v2-icon-icon-muted"
           valueClass="truncate pl-5 text-[13px] font-[440] leading-5 text-v2-text-text-faint"
           triggerStyle={props.state.style}
           triggerProps={{ "data-action": "prompt-agent" }}
@@ -2233,8 +2233,9 @@ function ComposerAgentControl(props: { state: ComposerAgentControlState }) {
 
 function ComposerModelControl(props: { state: ComposerModelControlState }) {
   return (
-    <Show when={!props.state.loading}>
-      <Show
+    <div data-component="prompt-model-control" class="min-w-0 flex-1 sm:flex-none">
+      <Show when={!props.state.loading}>
+        <Show
         when={props.state.paid}
         fallback={
           <TooltipV2
@@ -2255,7 +2256,7 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
                   as="div"
                   variant="ghost"
                   size="normal"
-                  class="min-w-0 max-w-[220px] justify-start text-[13px] font-[440] leading-5 text-v2-text-text-faint group"
+                  class="min-w-0 w-full max-w-[220px] justify-start text-[13px] font-[440] leading-5 text-v2-text-text-faint group sm:w-auto"
                   classList={{ "animate-in fade-in": props.state.shouldAnimate }}
                   style={props.state.style}
                   onClick={props.state.onUnpaidClick}
@@ -2280,7 +2281,7 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
                 data-action="prompt-model"
                 variant="ghost-muted"
                 size="normal"
-                class="min-w-0 max-w-[220px] justify-start ![font-weight:440] group"
+                class="min-w-0 w-full max-w-[220px] justify-start ![font-weight:440] group sm:w-auto"
                 classList={{ "animate-in fade-in": props.state.shouldAnimate }}
                 style={props.state.style}
                 onClick={props.state.onUnpaidClick}
@@ -2312,7 +2313,7 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
                   size: "normal",
                   style: props.state.style,
                   class:
-                    "min-w-0 max-w-[220px] justify-start text-[13px] font-[440] leading-5 text-v2-text-text-faint group",
+                    "min-w-0 w-full max-w-[220px] justify-start text-[13px] font-[440] leading-5 text-v2-text-text-faint group sm:w-auto",
                   classList: { "animate-in fade-in": props.state.shouldAnimate },
                   "data-action": "prompt-model",
                 }}
@@ -2329,7 +2330,7 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
                 variant: "ghost-muted",
                 size: "normal",
                 style: props.state.style,
-                class: "min-w-0 max-w-[220px] justify-start ![font-weight:440] group",
+                class: "min-w-0 w-full max-w-[220px] justify-start ![font-weight:440] group sm:w-auto",
                 classList: { "animate-in fade-in": props.state.shouldAnimate },
                 "data-action": "prompt-model",
               }}
@@ -2339,8 +2340,9 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
             </ModelSelectorPopoverV2>
           </Show>
         </TooltipV2>
+        </Show>
       </Show>
-    </Show>
+    </div>
   )
 }
 

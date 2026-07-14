@@ -57,6 +57,27 @@ export const childSessionOnPath = (sessions: Session[] | undefined, rootID: stri
 export const displayName = (project: { name?: string; worktree: string }) =>
   project.name || getFilename(project.worktree) || project.worktree
 
+export const compactProjectPath = (worktree: string) => {
+  const slashed = worktree.replaceAll("\\", "/")
+  const unc = slashed.startsWith("//")
+  const normalized = `${unc ? "//" : ""}${slashed.slice(unc ? 2 : 0).replace(/\/{2,}/g, "/")}`
+
+  if (normalized === "/" || normalized === "//") return normalized
+  if (/^[A-Za-z]:\/?$/.test(normalized)) return `${normalized.slice(0, 2)}/`
+
+  const root = unc
+    ? "//"
+    : normalized.startsWith("/")
+      ? "/"
+      : /^[A-Za-z]:\//.test(normalized)
+        ? normalized.slice(0, 3)
+        : ""
+  const parts = normalized.slice(root.length).replace(/\/$/, "").split("/").filter(Boolean)
+
+  if (parts.length <= 2) return `${root}${parts.join("/")}`
+  return `${root}.../${parts.slice(-2).join("/")}`
+}
+
 export function toggleHomeProjectSelection(
   current: HomeProjectSelection | undefined,
   server: ServerConnection.Key,

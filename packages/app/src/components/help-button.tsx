@@ -1,5 +1,6 @@
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { createMediaQuery } from "@solid-primitives/media"
 import { createSignal, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Drawer, DrawerClose, DrawerContent } from "@/components/ui/drawer"
@@ -41,7 +42,7 @@ export function HelpButton() {
       aria-label="Open the OpenCode website"
       data-component="icon-button-v2"
       data-size="large"
-      class={`${triggerClass} fixed bottom-5 right-5 z-50 flex items-center justify-center`}
+      class={`${triggerClass} fixed right-4 bottom-[7.5rem] z-50 flex items-center justify-center sm:right-5 sm:bottom-5`}
       onClick={(event) => {
         event.preventDefault()
         platform.openLink(event.currentTarget.href)
@@ -59,12 +60,13 @@ export function TabsInfoPopup() {
   const [state, setState] = persisted(Persist.global("tabsInfoPopup"), createStore({ dismissed: false }))
   // setState({ dismissed: false }) // for testing
   const [drawerOpen, setDrawerOpen] = createSignal(false)
+  const desktop = createMediaQuery("(min-width: 640px)")
 
   return (
     <Drawer open={drawerOpen()} onOpenChange={setDrawerOpen} side="right">
-      <Show when={!state.dismissed}>
+      <Show when={!state.dismissed && desktop()}>
         <div
-          class="fixed bottom-14 right-5 z-50 h-[240px] w-[192px] rounded-[8px] bg-v2-background-bg-base p-1 shadow-[var(--v2-elevation-floating)]"
+          class="fixed bottom-40 left-1/2 z-50 h-[240px] w-[192px] -translate-x-1/2 rounded-[8px] bg-v2-background-bg-base p-1 shadow-[var(--v2-elevation-floating)] sm:right-5 sm:bottom-14 sm:left-auto sm:translate-x-0"
           aria-label="Introducing Tabs. A faster, more intuitive way to work."
         >
           <button

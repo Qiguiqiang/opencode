@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./global-sync/eviction"
-import { estimateRootSessionTotal, loadRootSessionsWithFallback } from "./global-sync/session-load"
+import { estimateRootSessionTotal, loadRootSessionsWithFallback, rootSessionRequestLimit } from "./global-sync/session-load"
 
 describe("pickDirectoriesToEvict", () => {
   test("keeps pinned stores and evicts idle stores", () => {
@@ -60,6 +60,16 @@ describe("loadRootSessionsWithFallback", () => {
       { directory: "dir", roots: true, limit: 25 },
       { directory: "dir", roots: true },
     ])
+  })
+})
+
+describe("rootSessionRequestLimit", () => {
+  test("keeps the existing recent-session overscan by default", () => {
+    expect(rootSessionRequestLimit({ retained: 64, recent: 50 })).toBe(114)
+  })
+
+  test("uses the requested summary limit exactly when overscan is disabled", () => {
+    expect(rootSessionRequestLimit({ retained: 64, recent: 50, exact: true })).toBe(64)
   })
 })
 

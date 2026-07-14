@@ -7,6 +7,7 @@ import { usePlatform } from "@/context/platform"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, ToastRegion } from "@/utils/toast"
 import { useSettingsCommand } from "@/components/settings-dialog"
+import { RoutedFloatingProjectSwitch } from "@/pages/home"
 
 export default function NewLayout(props: ParentProps) {
   const platform = usePlatform()
@@ -38,6 +39,7 @@ export default function NewLayout(props: ParentProps) {
       <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
         <Suspense>{props.children}</Suspense>
       </main>
+      <RoutedFloatingProjectSwitch />
       {import.meta.env.DEV && <DebugBar inline />}
       <TabsInfoPopup />
       <HelpButton />

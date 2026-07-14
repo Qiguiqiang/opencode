@@ -4,7 +4,6 @@ import {
   createEffect,
   createMemo,
   createResource,
-  createRoot,
   For,
   Match,
   on,
@@ -15,6 +14,7 @@ import {
   Switch,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import { createMediaQuery } from "@solid-primitives/media"
 import { createStore, produce } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
@@ -28,7 +28,7 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { getProjectAvatarVariant, useLayout, type HomeProjectSelection, type LocalProject } from "@/context/layout"
-import { useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Icon } from "@opencode-ai/ui/icon"
 import { usePlatform } from "@/context/platform"
@@ -45,6 +45,7 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import {
   closeHomeProject,
+  compactProjectPath,
   displayName,
   errorMessage,
   getProjectAvatarSource,
@@ -63,12 +64,36 @@ import { ServerRowMenu } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { type ServerHealth } from "@/utils/server-health"
 import { Persist, persisted } from "@/utils/persist"
-import { useMarked } from "@opencode-ai/ui/context/marked"
-import { preloadMarkdown } from "@opencode-ai/session-ui/markdown-cache"
 import { archiveHomeSession } from "./home-session-archive"
 import { shouldOpenSessionInBackground } from "./home-session-open"
+import { homeProjectSwitchState } from "./home-project-switch"
 import { showToast } from "@/utils/toast"
 import { fileManagerApp } from "@/utils/file-manager"
+import {
+  projectUsageKey,
+  rankProjectsByUsage,
+  recordProjectUsage,
+  shouldRecordProjectSwitch,
+  type ProjectUsage,
+} from "./home-project-ranking"
+import {
+  clampFloatingProjectPosition,
+  blurFloatingProjectActiveElement,
+  floatingProjectButtonVisualState,
+  floatingProjectDestination,
+  floatingProjectGestureIntent,
+  floatingProjectPoint,
+  floatingProjectPositionForMode,
+  floatingProjectPositionState,
+  floatingProjectSessionDestination,
+  floatingProjectTextInputFocused,
+  routedFloatingProjectSwitchVisible,
+  snapFloatingProjectPosition,
+  type FloatingProjectMode,
+  type FloatingProjectPoint,
+  type FloatingProjectPosition,
+  type FloatingProjectRouteMode,
+} from "./home-project-floating"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -80,7 +105,7 @@ const HOME_ROW_LAYOUT =
 const HOME_ROW_BASE = `${HOME_ROW_LAYOUT} border-0`
 const HOME_ROW = `${HOME_ROW_BASE} [font-weight:530] text-v2-text-text-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover`
 const HOME_PROJECT_NAV_LABEL = "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-const HOME_PROJECT_NAV_ROW = `${HOME_ROW_LAYOUT} h-7 gap-2 px-1.5 [font-weight:440] text-v2-text-text-muted hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base hover:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)] data-[selected]:bg-v2-background-bg-layer-03 data-[selected]:text-v2-text-text-base data-[selected]:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)] data-[selected]:hover:bg-v2-background-bg-layer-03 focus-visible:bg-v2-background-bg-layer-01 focus-visible:text-v2-text-text-base focus-visible:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)]`
+const HOME_PROJECT_NAV_ROW = `${HOME_ROW_LAYOUT} h-7 gap-2 px-1.5 [font-weight:440] text-v2-text-text-muted hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base hover:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)] data-[selected]:bg-v2-background-bg-layer-03 data-[selected]:text-v2-text-text-base data-[selected]:[font-weight:600] data-[selected]:[box-shadow:inset_3px_0_0_var(--v2-border-border-focus),inset_0_0_0_0.5px_var(--v2-border-border-strong)] data-[selected]:hover:bg-v2-background-bg-layer-03 focus-visible:bg-v2-background-bg-layer-01 focus-visible:text-v2-text-text-base focus-visible:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)]`
 const HOME_SECTION_LABEL = "text-v2-text-text-muted [font-weight:440]"
 
 type HomeSessionRecord = {
@@ -129,6 +154,29 @@ function buildHomeSessionRecords(input: {
         projectName: displayName(project),
       }
     })
+}
+
+async function loadFloatingProjectSessions(
+  global: ReturnType<typeof useGlobal>,
+  server: ServerConnection.Any,
+  directory: string,
+) {
+  const ctx = global.ensureServerCtx(server)
+  const key = pathKey(directory)
+  const project = ctx.projects.list().find((item) => pathKey(item.worktree) === key)
+  const directories = project ? [project.worktree, ...(project.sandboxes ?? [])] : [directory]
+  await Promise.all(
+    directories.map((item) => ctx.sync.project.loadSessions(item, { limit: HOME_SESSION_LIMIT, exact: true })),
+  )
+  return [
+    ...new Map(
+      directories
+        .flatMap((item) => sortedRootSessions(ctx.sync.child(item, { bootstrap: false })[0], Date.now()))
+        .map((session) => [`${pathKey(session.directory)}:${session.id}`, session] as const),
+    ).values(),
+  ]
+    .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
+    .slice(0, HOME_SESSION_LIMIT)
 }
 
 function matchesHomeSessionSearch(record: HomeSessionRecord, query: string) {
@@ -268,14 +316,25 @@ export function NewHome() {
   const tabs = useTabs()
   const command = useCommand()
   const notification = useNotification()
-  const marked = useMarked()
   const openSettings = useSettingsDialog()
+  const mobile = createMediaQuery("(max-width: 767px)")
   let focusSessionSearch: (() => void) | undefined
   const [state, setState] = createStore({
     search: "",
     searchFocused: false,
   })
   const selection = layout.home.selection
+  const [projectUsage, setProjectUsage] = persisted(
+    Persist.global("home.project-usage.v1"),
+    createStore({
+      desktop: {} as Record<string, ProjectUsage>,
+      mobile: {} as Record<string, ProjectUsage>,
+    }),
+  )
+  const [floatingProjectPosition, setFloatingProjectPosition] = persisted(
+    Persist.global("home.project-floating.v1"),
+    createStore(floatingProjectPositionState({})),
+  )
 
   const focusedServer = createMemo(
     () => global.servers.list().find((conn) => ServerConnection.key(conn) === selection().server) ?? server.current,
@@ -323,7 +382,7 @@ export function NewHome() {
     queryFn: async () => {
       await Promise.all(
         projectDirectories().map((directory) =>
-          focusedSync().project.loadSessions(directory, { limit: HOME_SESSION_LIMIT }),
+          focusedSync().project.loadSessions(directory, { limit: HOME_SESSION_LIMIT, exact: true }),
         ),
       )
       return null
@@ -349,42 +408,16 @@ export function NewHome() {
   })
   const searchOpen = createMemo(() => state.searchFocused && search().length > 0)
   const groups = createMemo(() => groupSessions(records(), language))
-  const sessionHeaderOpacity = useHomeSessionHeaderOpacity(groups)
-  const prefetched = new Set<string>()
-
-  createEffect(() => {
-    const ctx = focusedServerCtx()
-    if (!ctx) return
-    records()
-      .slice(0, 2)
-      .forEach((record) => {
-        const key = `${ServerConnection.key(focusedServer()!)}\0${record.session.id}`
-        if (prefetched.has(key)) return
-        prefetched.add(key)
-        createRoot((dispose) => {
-          try {
-            const directory = ctx.sync.ensureDirSyncContext(record.session.directory)
-            void directory.session
-              .sync(record.session.id)
-              .then(() => {
-                return Promise.all(
-                  (ctx.sync.session.data.message[record.session.id] ?? []).flatMap((message) =>
-                    (ctx.sync.session.data.part[message.id] ?? []).flatMap((part) => {
-                      if (part.type !== "text" || !part.text) return []
-                      return preloadMarkdown(part.text, part.id, marked)
-                    }),
-                  ),
-                )
-              })
-              .catch(() => {})
-              .finally(dispose)
-          } catch {
-            dispose()
-          }
-        })
-      })
+  const sessionView = createMemo(() => {
+    const project = selectedProject()
+    return homeProjectSwitchState({
+      projectName: project ? displayName(project) : undefined,
+      fallbackTitle: language.t("sidebar.project.recentSessions"),
+      loading: sessionLoad.isFetching,
+      content: groups(),
+    })
   })
-
+  const sessionHeaderOpacity = useHomeSessionHeaderOpacity(groups)
   function setSelection(next: HomeProjectSelection) {
     layout.home.setSelection(next)
   }
@@ -439,6 +472,12 @@ export function NewHome() {
         .some((project) => project.worktree === directory)
     )
       return
+    if (shouldRecordProjectSwitch(selection(), key, directory)) {
+      const mode = mobile() ? "mobile" : "desktop"
+      const usageKey = projectUsageKey(key, directory)
+      const next = recordProjectUsage(projectUsage, mode, key, directory, Date.now())
+      setProjectUsage(mode, usageKey, next[mode][usageKey])
+    }
     setSelection(toggleHomeProjectSelection(selection(), key, directory))
   }
 
@@ -501,6 +540,23 @@ export function NewHome() {
     })
   }
 
+  function openFloatingSession(conn: ServerConnection.Any, directory: string, session: Session) {
+    const key = ServerConnection.key(conn)
+    const ctx = global.ensureServerCtx(conn)
+    ctx.projects.open(directory)
+    ctx.projects.touch(directory)
+    if (shouldRecordProjectSwitch(selection(), key, directory)) {
+      const usageKey = projectUsageKey(key, directory)
+      const next = recordProjectUsage(projectUsage, mode(), key, directory, Date.now())
+      setProjectUsage(mode(), usageKey, next[mode()][usageKey])
+    }
+    setSelection({ server: key, directory })
+    startTransition(() => {
+      const tab = tabs.addSessionTab({ server: key, sessionId: session.id })
+      tabs.select(tab)
+    })
+  }
+
   async function archiveSession(session: Session) {
     const conn = focusedServer()
     const ctx = focusedServerCtx()
@@ -540,45 +596,110 @@ export function NewHome() {
     })
   }
 
-  return (
-    <div class="rounded-[10px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 lg:overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
-      <div class="mx-auto grid h-full w-full max-w-[1080px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
-        <HomeProjectColumn
-          projects={projects()}
-          recentlyClosed={recentlyClosed()}
-          homedir={homedir()}
-          selected={selection()}
-          focusServer={focusServer}
-          selectProject={selectProject}
-          openNewSession={openProjectNewSession}
-          openRecentProject={(conn, directory) => addProjects(conn, [directory])}
-          chooseProject={(conn) => void chooseProject(conn)}
-          editProject={editProject}
-          closeProject={(conn, directory) => {
-            const next = closeHomeProject(
-              selection(),
-              ServerConnection.key(conn),
-              global.ensureServerCtx(conn).projects,
-              directory,
-            )
-            if (next) setSelection(next)
-          }}
-          clearNotifications={clearNotifications}
-          unseenCount={unseenCount}
-          openSettings={openSettings}
-          openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-          language={language}
-        />
+  const mode = createMemo<FloatingProjectMode>(() => (mobile() ? "mobile" : "desktop"))
+  const closeProject = (conn: ServerConnection.Any, directory: string) => {
+    const next = closeHomeProject(selection(), ServerConnection.key(conn), global.ensureServerCtx(conn).projects, directory)
+    if (next) setSelection(next)
+  }
+  const projectColumnProps = () => ({
+    projects: projects(),
+    recentlyClosed: recentlyClosed(),
+    homedir: homedir(),
+    selected: selection(),
+    usage: projectUsage[mode()],
+    focusServer,
+    selectProject,
+    openNewSession: openProjectNewSession,
+    openRecentProject: (conn: ServerConnection.Any, directory: string) => addProjects(conn, [directory]),
+    chooseProject: (conn: ServerConnection.Any) => void chooseProject(conn),
+    editProject,
+    closeProject,
+    clearNotifications,
+    unseenCount,
+    openSettings,
+    openHelp: () => platform.openLink("https://opencode.ai/desktop-feedback"),
+    loadProjectSessions: (conn: ServerConnection.Any, directory: string) =>
+      loadFloatingProjectSessions(global, conn, directory),
+    openSession: openFloatingSession,
+    language,
+  })
 
-        <section
-          class="min-h-0 min-w-0 flex-1 flex flex-col pt-6 lg:pt-12 relative"
-          aria-label={language.t("sidebar.project.recentSessions")}
-        >
+  return (
+    <>
+      <div class="rounded-[10px] shadow-[var(--v2-elevation-raised)] m-2 min-h-0 overflow-hidden bg-v2-background-bg-base self-stretch flex-1">
+        <div class="mx-auto grid h-full w-full max-w-[1080px] grid-rows-[minmax(180px,36dvh)_minmax(0,1fr)_auto] gap-4 px-3 lg:grid-cols-[280px_minmax(0,720px)] lg:grid-rows-1 lg:gap-8 lg:px-6">
+          <HomeProjectColumn {...projectColumnProps()} />
+
+          <section
+            class="min-h-0 min-w-0 flex-1 flex flex-col pt-6 lg:pt-12 relative"
+            aria-label={language.t("sidebar.project.recentSessions")}
+            aria-busy={sessionView().loading ? "true" : undefined}
+          >
+          <div
+            data-component="home-session-scope"
+            class="mb-3 flex h-10 min-w-0 shrink-0 items-center justify-between gap-3"
+            aria-live="polite"
+          >
+            <div class="flex min-w-0 items-center gap-2.5">
+              <Show
+                when={selectedProject()}
+                fallback={
+                  <div class="flex size-6 shrink-0 items-center justify-center rounded-[6px] bg-v2-background-bg-layer-02 text-v2-icon-icon-muted">
+                    <IconV2 name="folder-add-left" size="small" />
+                  </div>
+                }
+              >
+                {(project) => <HomeProjectAvatar project={project()} />}
+              </Show>
+              <Show
+                when={selectedProject()}
+                fallback={
+                  <div class="min-w-0">
+                    <div class="text-[11px] leading-4 text-v2-text-text-muted [font-weight:440]">
+                      {language.t("home.projects")}
+                    </div>
+                    <div
+                      class="overflow-hidden text-ellipsis whitespace-nowrap text-[14px] leading-5 text-v2-text-text-base [font-weight:600]"
+                      title={sessionView().title}
+                    >
+                      {sessionView().title}
+                    </div>
+                  </div>
+                }
+              >
+                {(project) => (
+                  <div class="min-w-0">
+                    <div
+                      class="overflow-hidden text-ellipsis whitespace-nowrap text-[14px] leading-5 text-v2-text-text-base [font-weight:600]"
+                      title={displayName(project())}
+                    >
+                      {displayName(project())}
+                    </div>
+                    <div
+                      class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-4 text-v2-text-text-muted [font-weight:440]"
+                      title={project().worktree}
+                    >
+                      {compactProjectPath(project().worktree)}
+                    </div>
+                  </div>
+                )}
+              </Show>
+            </div>
+            <Show when={sessionView().loading}>
+              <div
+                role="status"
+                aria-label={language.t("common.loading")}
+                class="flex size-7 shrink-0 items-center justify-center text-v2-icon-icon-muted"
+              >
+                <Spinner class="size-3.5" />
+              </div>
+            </Show>
+          </div>
           <HomeSessionSearch
             value={state.search}
             placeholder={searchPlaceholder()}
             open={searchOpen()}
-            loading={sessionLoad.isLoading}
+            loading={sessionView().loading}
             results={searchResults()}
             showProjectName={!selectedProject()}
             server={selection().server}
@@ -611,7 +732,7 @@ export function NewHome() {
               </div>
             </Show>
             <Show
-              when={!sessionLoad.isLoading}
+              when={!sessionView().loading}
               fallback={
                 <div class="pt-3">
                   <HomeSessionSkeleton label={language.t("common.loading")} />
@@ -619,11 +740,16 @@ export function NewHome() {
               }
             >
               <Show
-                when={groups().length > 0}
+                when={sessionView().content.length > 0}
                 fallback={<HomeSessionsEmpty onNewSession={newSessionProject() ? openNewSession : undefined} />}
               >
-                <div ref={sessionHeaderOpacity.setContentRef} class="flex flex-col pt-3 pr-3 pb-16">
-                  <For each={groups()}>
+                <div
+                  ref={sessionHeaderOpacity.setContentRef}
+                  data-component="home-session-content"
+                  data-project={selection().directory}
+                  class="animate-in fade-in flex flex-col pt-3 pr-3 pb-16 duration-150"
+                >
+                  <For each={sessionView().content}>
                     {(group, index) => (
                       <>
                         <HomeSessionGroupHeader
@@ -633,7 +759,7 @@ export function NewHome() {
                           elevated={index() === 0}
                         />
                         <div
-                          class={`flex min-w-0 flex-col gap-px pt-4 ${index() === groups().length - 1 ? "" : "mb-6"}`}
+                          class={`flex min-w-0 flex-col gap-px pt-4 ${index() === sessionView().content.length - 1 ? "" : "mb-6"}`}
                         >
                           <For each={group.sessions}>
                             {(record) => (
@@ -654,15 +780,797 @@ export function NewHome() {
               </Show>
             </Show>
           </ScrollView>
-        </section>
-        <HomeUtilityNav
-          class="flex lg:hidden"
-          openSettings={openSettings}
-          openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-          language={language}
-        />
+          </section>
+          <HomeUtilityNav
+            class="flex lg:hidden"
+            openSettings={openSettings}
+            openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+            language={language}
+          />
+        </div>
       </div>
+      <HomeFloatingProjectSwitch
+        {...projectColumnProps()}
+        mode={mode()}
+        position={floatingProjectPositionForMode(floatingProjectPosition, mode())}
+        selectedProject={selectedProject()}
+        setPosition={(next) => setFloatingProjectPosition(mode(), next)}
+      />
+    </>
+  )
+}
+
+export function RoutedFloatingProjectSwitch(props: {
+  routeMode?: FloatingProjectRouteMode
+  directory?: string
+}) {
+  const location = useLocation()
+  const routeMode = () => props.routeMode ?? "new"
+
+  return (
+    <Show when={routedFloatingProjectSwitchVisible(routeMode(), location.pathname)}>
+      <RoutedFloatingProjectSwitchContent routeMode={routeMode()} directory={props.directory} />
+    </Show>
+  )
+}
+
+function RoutedFloatingProjectSwitchContent(props: {
+  routeMode: FloatingProjectRouteMode
+  directory?: string
+}) {
+  const sync = useServerSync()
+  const layout = useLayout()
+  const platform = usePlatform()
+  const pickDirectory = useDirectoryPicker()
+  const dialog = useDialog()
+  const navigate = useNavigate()
+  const server = useServer()
+  const language = useLanguage()
+  const global = useGlobal()
+  const tabs = useTabs()
+  const notification = useNotification()
+  const openSettings = useSettingsDialog()
+  const mobile = createMediaQuery("(max-width: 767px)")
+  const selection = () =>
+    props.routeMode === "legacy"
+      ? { server: server.key, directory: props.directory }
+      : layout.home.selection()
+  const [projectUsage, setProjectUsage] = persisted(
+    Persist.global("home.project-usage.v1"),
+    createStore({
+      desktop: {} as Record<string, ProjectUsage>,
+      mobile: {} as Record<string, ProjectUsage>,
+    }),
+  )
+  const [floatingProjectPosition, setFloatingProjectPosition] = persisted(
+    Persist.global("home.project-floating.v1"),
+    createStore(floatingProjectPositionState({})),
+  )
+  const focusedServer = createMemo(
+    () => global.servers.list().find((conn) => ServerConnection.key(conn) === selection().server) ?? server.current,
+  )
+  const focusedServerCtx = createMemo(() => {
+    const conn = focusedServer()
+    if (!conn) return
+    return global.ensureServerCtx(conn)
+  })
+  const focusedSync = () => focusedServerCtx()?.sync ?? sync()
+  const projects = createMemo(() => focusedServerCtx()?.projects.list() ?? layout.projects.list())
+  const recentlyClosed = createMemo(
+    () => focusedServerCtx()?.projects.recentlyClosed() ?? layout.projects.recentlyClosed(),
+  )
+  const homedir = createMemo(() => focusedSync().data.path.home ?? "")
+  const selectedProject = createMemo(() => projects().find((project) => project.worktree === selection().directory))
+  const mode = createMemo<FloatingProjectMode>(() => (mobile() ? "mobile" : "desktop"))
+
+  function setSelection(next: HomeProjectSelection) {
+    layout.home.setSelection(next)
+  }
+
+  createEffect(() => {
+    const list = global.servers.list()
+    if (list.some((conn) => ServerConnection.key(conn) === selection().server)) return
+    const conn = list.find((conn) => ServerConnection.key(conn) === server.key) ?? list[0]
+    if (conn) setSelection({ server: ServerConnection.key(conn) })
+  })
+
+  function focusServer(conn: ServerConnection.Any) {
+    const key = ServerConnection.key(conn)
+    setSelection({ server: key })
+    if (props.routeMode === "legacy") server.setActive(key)
+  }
+
+  function selectProject(conn: ServerConnection.Any, directory: string) {
+    const key = ServerConnection.key(conn)
+    if (global.servers.health[key]?.healthy === false) return
+    if (!global.ensureServerCtx(conn).projects.list().some((project) => project.worktree === directory)) return
+    if (shouldRecordProjectSwitch(selection(), key, directory)) {
+      const usageKey = projectUsageKey(key, directory)
+      const next = recordProjectUsage(projectUsage, mode(), key, directory, Date.now())
+      setProjectUsage(mode(), usageKey, next[mode()][usageKey])
+    }
+    if (props.routeMode === "legacy") {
+      const ctx = global.ensureServerCtx(conn)
+      ctx.projects.open(directory)
+      ctx.projects.touch(directory)
+      server.setActive(key)
+      setSelection({ server: key, directory })
+      navigate(floatingProjectDestination(props.routeMode, directory))
+      return
+    }
+    setSelection(toggleHomeProjectSelection(selection(), key, directory))
+    navigate(floatingProjectDestination(props.routeMode, directory))
+  }
+
+  function addProjects(conn: ServerConnection.Any, directories: string[]) {
+    const directory = directories[0]
+    if (!directory) return
+    const ctx = global.ensureServerCtx(conn)
+    directories.forEach(ctx.projects.open)
+    ctx.projects.touch(directory)
+    const key = ServerConnection.key(conn)
+    setSelection({ server: key, directory })
+    if (props.routeMode === "legacy") server.setActive(key)
+    navigate(floatingProjectDestination(props.routeMode, directory))
+  }
+
+  function openProjectNewSession(conn: ServerConnection.Any, directory: string) {
+    const ctx = global.ensureServerCtx(conn)
+    ctx.projects.open(directory)
+    ctx.projects.touch(directory)
+    if (props.routeMode === "legacy") {
+      const key = ServerConnection.key(conn)
+      server.setActive(key)
+      setSelection({ server: key, directory })
+      navigate(floatingProjectDestination(props.routeMode, directory))
+      return
+    }
+    tabs.newDraft({ server: ServerConnection.key(conn), directory })
+  }
+
+  function editProject(conn: ServerConnection.Any, project: LocalProject) {
+    void import("@/components/dialog-edit-project-v2").then((component) => {
+      void dialog.show(() => <component.DialogEditProjectV2 server={conn} project={project} />)
+    })
+  }
+
+  function unseenCount(conn: ServerConnection.Any, project: LocalProject) {
+    const state = notification.ensureServerState(ServerConnection.key(conn))
+    return [project.worktree, ...(project.sandboxes ?? [])].reduce(
+      (total, directory) => total + state.project.unseenCount(directory),
+      0,
+    )
+  }
+
+  function clearNotifications(conn: ServerConnection.Any, project: LocalProject) {
+    const state = notification.ensureServerState(ServerConnection.key(conn))
+    ;[project.worktree, ...(project.sandboxes ?? [])]
+      .filter((directory) => state.project.unseenCount(directory) > 0)
+      .forEach((directory) => state.project.markViewed(directory))
+  }
+
+  function openFloatingSession(conn: ServerConnection.Any, directory: string, session: Session) {
+    const key = ServerConnection.key(conn)
+    const ctx = global.ensureServerCtx(conn)
+    ctx.projects.open(directory)
+    ctx.projects.touch(directory)
+    if (shouldRecordProjectSwitch(selection(), key, directory)) {
+      const usageKey = projectUsageKey(key, directory)
+      const next = recordProjectUsage(projectUsage, mode(), key, directory, Date.now())
+      setProjectUsage(mode(), usageKey, next[mode()][usageKey])
+    }
+    setSelection({ server: key, directory })
+    if (props.routeMode === "legacy") {
+      server.setActive(key)
+      navigate(floatingProjectSessionDestination(props.routeMode, session.directory, session.id))
+      return
+    }
+    startTransition(() => {
+      const tab = tabs.addSessionTab({ server: key, sessionId: session.id })
+      tabs.select(tab)
+    })
+  }
+
+  function chooseProject(conn: ServerConnection.Any) {
+    if (global.servers.health[ServerConnection.key(conn)]?.healthy === false) return
+
+    pickDirectory({
+      server: conn,
+      title: language.t("command.project.open"),
+      multiple: true,
+      onSelect: (result) => addProjects(conn, homeProjectDirectories(result)),
+    })
+  }
+
+  function closeProject(conn: ServerConnection.Any, directory: string) {
+    const next = closeHomeProject(selection(), ServerConnection.key(conn), global.ensureServerCtx(conn).projects, directory)
+    if (next) setSelection(next)
+  }
+
+  const projectColumnProps = () => ({
+    projects: projects(),
+    recentlyClosed: recentlyClosed(),
+    homedir: homedir(),
+    selected: selection(),
+    usage: projectUsage[mode()],
+    focusServer,
+    selectProject,
+    openNewSession: openProjectNewSession,
+    openRecentProject: (conn: ServerConnection.Any, directory: string) => addProjects(conn, [directory]),
+    chooseProject: (conn: ServerConnection.Any) => void chooseProject(conn),
+    editProject,
+    closeProject,
+    clearNotifications,
+    unseenCount,
+    openSettings,
+    openHelp: () => platform.openLink("https://opencode.ai/desktop-feedback"),
+    loadProjectSessions: (conn: ServerConnection.Any, directory: string) =>
+      loadFloatingProjectSessions(global, conn, directory),
+    openSession: openFloatingSession,
+    language,
+  })
+
+  return (
+    <HomeFloatingProjectSwitch
+      {...projectColumnProps()}
+      mode={mode()}
+      position={floatingProjectPositionForMode(floatingProjectPosition, mode())}
+      selectedProject={selectedProject()}
+      setPosition={(next) => setFloatingProjectPosition(mode(), next)}
+    />
+  )
+}
+
+type FloatingProjectItem = {
+  server: ServerConnection.Any
+  project: LocalProject
+}
+
+type FloatingProjectGestureState = "idle" | "pending" | "moving"
+type FloatingProjectPanelState = "closed" | "projects" | "sessions"
+
+function HomeFloatingProjectSwitch(props: {
+  projects: LocalProject[]
+  recentlyClosed: LocalProject[]
+  homedir: string
+  selected: HomeProjectSelection
+  usage: Record<string, ProjectUsage>
+  focusServer: (server: ServerConnection.Any) => void
+  selectProject: (server: ServerConnection.Any, directory: string) => void
+  openNewSession: (server: ServerConnection.Any, directory: string) => void
+  openRecentProject: (server: ServerConnection.Any, directory: string) => void
+  chooseProject: (server: ServerConnection.Any) => void
+  editProject: (server: ServerConnection.Any, project: LocalProject) => void
+  closeProject: (server: ServerConnection.Any, directory: string) => void
+  clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
+  unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
+  openSettings: () => void
+  openHelp: () => void
+  loadProjectSessions: (server: ServerConnection.Any, directory: string) => Promise<Session[]>
+  openSession: (server: ServerConnection.Any, directory: string, session: Session) => void
+  language: ReturnType<typeof useLanguage>
+  mode: FloatingProjectMode
+  position: FloatingProjectPosition
+  selectedProject: LocalProject | undefined
+  setPosition: (position: FloatingProjectPosition) => void
+}) {
+  let root: HTMLDivElement | undefined
+  let requestSequence = 0
+  const global = useGlobal()
+  const [state, setState] = createStore({
+    panel: "closed" as FloatingProjectPanelState,
+    gesture: "idle" as FloatingProjectGestureState,
+    pointerID: undefined as number | undefined,
+    origin: undefined as FloatingProjectPoint | undefined,
+    start: undefined as FloatingProjectPoint | undefined,
+    selectedProject: undefined as FloatingProjectItem | undefined,
+    sessions: [] as Session[],
+    loading: false,
+    failed: false,
+    inputFocused: false,
+    viewport: { width: 1024, height: 768 },
+  })
+  const projectItems = createMemo(() =>
+    global.servers.list().flatMap((server) => {
+      const key = ServerConnection.key(server)
+      if (global.servers.health[key]?.healthy === false) return []
+      return rankProjectsByUsage(global.ensureServerCtx(server).projects.list(), key, props.usage).map((project) => ({
+        server,
+        project,
+      }))
+    }),
+  )
+  const position = createMemo(() => clampFloatingProjectPosition(props.position, state.viewport))
+  const point = createMemo(() => floatingProjectPoint(position(), state.viewport))
+  const panelTop = createMemo(() => {
+    const maxHeight = Math.min(560, state.viewport.height - 32)
+    return Math.min(Math.max(16, point().y + 52), state.viewport.height - 16 - maxHeight)
+  })
+  const style = createMemo(() => ({
+    left: `${point().x}px`,
+    top: `${point().y}px`,
+  }))
+  const buttonVisual = createMemo(() => floatingProjectButtonVisualState({ inputFocused: state.inputFocused }))
+  const panelStyle = createMemo(() => ({
+    top: `${panelTop()}px`,
+    left: position().edge === "left" ? "16px" : undefined,
+    right: position().edge === "right" ? "16px" : undefined,
+  }))
+  const label = createMemo(() => {
+    const project = props.selectedProject
+    if (!project) return props.language.t("home.projects")
+    return `${displayName(project)}, ${compactProjectPath(project.worktree)}`
+  })
+  const syncViewport = () => {
+    const viewport = { width: window.innerWidth, height: window.innerHeight }
+    setState("viewport", viewport)
+    props.setPosition(clampFloatingProjectPosition(props.position, viewport))
+  }
+
+  function closePanel() {
+    requestSequence++
+    setState({
+      panel: "closed",
+      selectedProject: undefined,
+      sessions: [],
+      loading: false,
+      failed: false,
+    })
+  }
+
+  function openProjectPanel() {
+    blurFloatingProjectActiveElement()
+    if (state.panel !== "closed") {
+      closePanel()
+      return
+    }
+    setState({ panel: "projects", selectedProject: undefined, sessions: [], loading: false, failed: false })
+  }
+
+  function resetGesture() {
+    requestSequence++
+    setState({
+      gesture: "idle",
+      pointerID: undefined,
+      origin: undefined,
+      start: undefined,
+      selectedProject: undefined,
+      sessions: [],
+      loading: false,
+      failed: false,
+    })
+  }
+
+  async function loadSessions(item: FloatingProjectItem) {
+    const sequence = ++requestSequence
+    setState({ selectedProject: item, sessions: [], loading: true, failed: false })
+    const result = await props.loadProjectSessions(item.server, item.project.worktree).then(
+      (sessions) => ({ ok: true as const, sessions }),
+      () => ({ ok: false as const, sessions: [] as Session[] }),
+    )
+    if (sequence !== requestSequence) return
+    if (state.panel !== "sessions") return
+    if (!result.ok) {
+      setState({ sessions: [], loading: false, failed: true })
+      return
+    }
+    setState({ sessions: result.sessions, loading: false, failed: false })
+  }
+
+  function openPanelProject(server: ServerConnection.Any, directory: string) {
+    blurFloatingProjectActiveElement()
+    const key = ServerConnection.key(server)
+    const item = projectItems().find(
+      (candidate) =>
+        ServerConnection.key(candidate.server) === key && pathKey(candidate.project.worktree) === pathKey(directory),
+    )
+    if (!item) return
+    setState("panel", "sessions")
+    void loadSessions(item)
+  }
+
+  function backToProjects() {
+    blurFloatingProjectActiveElement()
+    requestSequence++
+    setState({
+      panel: "projects",
+      selectedProject: undefined,
+      sessions: [],
+      loading: false,
+      failed: false,
+    })
+  }
+
+  function openPanelSession(session: Session) {
+    blurFloatingProjectActiveElement()
+    const item = state.selectedProject
+    if (!item) return
+    props.openSession(item.server, item.project.worktree, session)
+    closePanel()
+  }
+
+  function dismissPanelForGesture() {
+    if (state.panel === "closed") return
+    requestSequence++
+    setState({ panel: "closed", selectedProject: undefined, sessions: [], loading: false, failed: false })
+  }
+
+  onMount(() => {
+    const syncInputFocused = () => setState("inputFocused", floatingProjectTextInputFocused())
+    syncViewport()
+    syncInputFocused()
+    makeEventListener(window, "resize", syncViewport)
+    makeEventListener(document, "focusin", syncInputFocused)
+    makeEventListener(document, "focusout", () => requestAnimationFrame(syncInputFocused))
+    makeEventListener(document, "pointerdown", (event) => {
+      if (state.panel === "closed") return
+      const target = event.target
+      if (target instanceof Node && root?.contains(target)) return
+      closePanel()
+    })
+  })
+  onCleanup(() => {
+    requestSequence++
+  })
+
+  function dragPoint(event: PointerEvent) {
+    if (!state.origin || !state.start) return point()
+    return {
+      x: state.origin.x + event.clientX - state.start.x,
+      y: state.origin.y + event.clientY - state.start.y,
+    }
+  }
+
+  function startPointer(event: PointerEvent & { currentTarget: HTMLButtonElement }) {
+    if (event.button !== 0 || !event.isPrimary || state.gesture !== "idle") return
+    event.preventDefault()
+    blurFloatingProjectActiveElement()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setState({
+      gesture: "pending",
+      pointerID: event.pointerId,
+      origin: point(),
+      start: { x: event.clientX, y: event.clientY },
+    })
+  }
+
+  function movePointer(event: PointerEvent) {
+    if (state.pointerID !== event.pointerId || !state.start) return
+    const horizontal = event.clientX - state.start.x
+    const vertical = event.clientY - state.start.y
+    if (state.gesture === "pending") {
+      const intent = floatingProjectGestureIntent({
+        x: horizontal,
+        y: vertical,
+      })
+      if (intent === "pending") return
+      dismissPanelForGesture()
+      setState("gesture", "moving")
+    }
+    if (state.gesture === "moving") {
+      props.setPosition(snapFloatingProjectPosition(dragPoint(event), state.viewport))
+    }
+  }
+
+  function releasePointer(event: PointerEvent & { currentTarget: HTMLButtonElement }) {
+    if (state.pointerID !== event.pointerId) return
+    const gesture = state.gesture
+    const start = state.start
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (gesture === "moving") props.setPosition(snapFloatingProjectPosition(dragPoint(event), state.viewport))
+    const intent = start
+      ? floatingProjectGestureIntent({
+          x: event.clientX - start.x,
+          y: event.clientY - start.y,
+          released: true,
+        })
+      : "pending"
+    resetGesture()
+    if (gesture === "pending" && intent === "tap") {
+      openProjectPanel()
+    }
+  }
+
+  function cancelPointer(event: PointerEvent & { currentTarget: HTMLButtonElement }) {
+    if (state.pointerID !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    resetGesture()
+  }
+
+  const panelProps = () => ({
+    ...props,
+    focusServer: (server: ServerConnection.Any) => {
+      props.focusServer(server)
+      closePanel()
+    },
+    selectProject: (server: ServerConnection.Any, directory: string) => {
+      openPanelProject(server, directory)
+    },
+    openNewSession: (server: ServerConnection.Any, directory: string) => {
+      props.openNewSession(server, directory)
+      closePanel()
+    },
+    openRecentProject: (server: ServerConnection.Any, directory: string) => {
+      props.openRecentProject(server, directory)
+      closePanel()
+    },
+    chooseProject: (server: ServerConnection.Any) => {
+      props.chooseProject(server)
+      closePanel()
+    },
+    panelProject: state.panel === "sessions" ? state.selectedProject : undefined,
+    sessions: state.sessions,
+    sessionsLoading: state.loading,
+    sessionsFailed: state.failed,
+    backToProjects,
+    openPanelSession,
+  })
+
+  return (
+    <div
+      ref={root}
+      data-component="home-floating-project-switch"
+      data-gesture={state.gesture}
+      data-edge={position().edge}
+      data-input-focused={state.inputFocused ? "" : undefined}
+      class="fixed inset-0 z-50 pointer-events-none"
+    >
+      <TooltipV2 placement={position().edge === "left" ? "right" : "left"} value={label()}>
+        <button
+          type="button"
+          data-action="home-floating-project-switch"
+          class={`pointer-events-auto fixed z-[1] flex size-11 touch-none select-none items-center justify-center border border-v2-border-border-base bg-v2-background-bg-layer-01 text-v2-icon-icon-base shadow-[var(--v2-elevation-floating)] transition-[background-color,box-shadow,border-radius,opacity] duration-150 ease-in-out hover:bg-v2-background-bg-layer-02 focus-visible:outline-none focus-visible:[box-shadow:0_0_0_2px_var(--v2-border-border-focus),var(--v2-elevation-floating)] ${buttonVisual().shape} ${buttonVisual().opacity}`}
+          classList={{
+            "cursor-grabbing": state.gesture === "moving",
+            "cursor-grab": state.gesture !== "moving",
+          }}
+          style={style()}
+          aria-label={label()}
+          aria-expanded={state.panel !== "closed"}
+          onPointerDown={startPointer}
+          onPointerMove={movePointer}
+          onPointerUp={releasePointer}
+          onPointerCancel={cancelPointer}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return
+            event.preventDefault()
+            openProjectPanel()
+          }}
+        >
+          <Show when={props.selectedProject} fallback={<IconV2 name="folder-add-left" />}>
+            {(project) => <HomeProjectAvatar project={project()} class="!size-7" />}
+          </Show>
+        </button>
+      </TooltipV2>
+      <Show when={state.panel !== "closed"}>
+        <div
+          data-floating-project-panel
+          class="pointer-events-auto fixed flex max-h-[min(560px,calc(100dvh-32px))] w-[min(calc(100vw-32px),340px)] min-w-0 overflow-hidden rounded-[10px] border border-v2-border-border-base bg-v2-background-bg-base shadow-[var(--v2-elevation-floating)]"
+          style={panelStyle()}
+        >
+          <HomeFloatingProjectPanel {...panelProps()} />
+        </div>
+      </Show>
     </div>
+  )
+}
+
+function HomeFloatingProjectPanel(props: {
+  projects: LocalProject[]
+  recentlyClosed: LocalProject[]
+  homedir: string
+  selected: HomeProjectSelection
+  usage: Record<string, ProjectUsage>
+  focusServer: (server: ServerConnection.Any) => void
+  selectProject: (server: ServerConnection.Any, directory: string) => void
+  openNewSession: (server: ServerConnection.Any, directory: string) => void
+  openRecentProject: (server: ServerConnection.Any, directory: string) => void
+  chooseProject: (server: ServerConnection.Any) => void
+  editProject: (server: ServerConnection.Any, project: LocalProject) => void
+  closeProject: (server: ServerConnection.Any, directory: string) => void
+  clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
+  unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
+  panelProject: FloatingProjectItem | undefined
+  sessions: Session[]
+  sessionsLoading: boolean
+  sessionsFailed: boolean
+  backToProjects: () => void
+  openPanelSession: (session: Session) => void
+  language: ReturnType<typeof useLanguage>
+}) {
+  const global = useGlobal()
+  const dialog = useDialog()
+  const controller = useServerManagementController({ navigateOnAdd: false })
+  const [_state, setState, _, ready] = persisted(
+    Persist.global("home.servers", ["home.servers.v1"]),
+    createStore({ collapsed: {} as Record<string, boolean> }),
+  )
+  const [state] = createResource(
+    () => ready.promise ?? Promise.resolve(),
+    (p) => p.then(() => _state),
+    { initialValue: _state },
+  )
+
+  return (
+    <Show
+      when={props.panelProject}
+      fallback={
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3" aria-label={props.language.t("home.projects")}>
+          <div class="flex h-8 min-w-0 shrink-0 items-center justify-between gap-2 pl-1">
+            <div class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-v2-text-text-base [font-weight:600]">
+              {props.language.t("home.projects")}
+            </div>
+            <Show
+              when={
+                global.servers.list().length === 1 && !(props.projects.length === 0 && props.recentlyClosed.length > 0)
+              }
+            >
+              <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
+                <IconButtonV2
+                  data-action="home-floating-add-project"
+                  variant="ghost-muted"
+                  size="large"
+                  icon={<IconV2 name="folder-add-left" />}
+                  disabled={global.servers.health[ServerConnection.key(global.servers.list()[0]!)]?.healthy === false}
+                  onClick={() => props.chooseProject(global.servers.list()[0]!)}
+                  aria-label={props.language.t("home.project.add")}
+                />
+              </TooltipV2>
+            </Show>
+          </div>
+          <ScrollView data-slot="home-floating-projects-scroll" class="min-h-0 min-w-0">
+            <Show
+              when={global.servers.list().length > 1}
+              fallback={
+                <Show
+                  when={props.projects.length > 0}
+                  fallback={
+                    <HomeProjectEmpty
+                      server={global.servers.list()[0]!}
+                      recentlyClosed={props.recentlyClosed}
+                      homedir={props.homedir}
+                      chooseProject={props.chooseProject}
+                      openRecentProject={props.openRecentProject}
+                      language={props.language}
+                    />
+                  }
+                >
+                  <HomeProjectList {...props} server={global.servers.list()[0]!} />
+                </Show>
+              }
+            >
+              <div class="flex min-w-0 flex-col gap-4">
+                <For each={global.servers.list()}>
+                  {(item) => {
+                    const key = ServerConnection.key(item)
+                    const healthy = () => !!global.servers.health[key]?.healthy
+                    const serverCtx = global.ensureServerCtx(item)
+                    const projects = () => serverCtx.projects.list()
+                    const hasProjects = () => projects().length > 0
+                    const collapsed = () => !!state().collapsed[key]
+                    return (
+                      <div class="flex min-w-0 flex-col gap-1">
+                        <HomeServerRow
+                          server={item}
+                          selected={props.selected.server === key && !props.selected.directory}
+                          collapsed={collapsed()}
+                          health={global.servers.health[key]}
+                          controller={controller}
+                          focusServer={props.focusServer}
+                          chooseProject={props.chooseProject}
+                          openEdit={(server) => dialog.show(() => <DialogServerV2 mode="edit" server={server} />)}
+                          toggleCollapsed={() => setState("collapsed", key, !state().collapsed[key])}
+                          language={props.language}
+                        />
+                        <Show when={healthy() && hasProjects() && !collapsed()}>
+                          <div class="mx-3 h-px bg-v2-border-border-base" />
+                          <HomeProjectList {...props} server={item} projects={projects()} />
+                        </Show>
+                      </div>
+                    )
+                  }}
+                </For>
+              </div>
+            </Show>
+          </ScrollView>
+        </div>
+      }
+    >
+      {(item) => (
+        <div
+          data-floating-project-sessions
+          class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 p-3"
+          aria-label={displayName(item().project)}
+        >
+          <div class="flex min-h-10 min-w-0 shrink-0 items-center gap-2">
+            <TooltipV2 placement="bottom" value={props.language.t("home.projects")}>
+              <IconButtonV2
+                data-action="home-floating-session-back"
+                variant="ghost-muted"
+                size="large"
+                icon={<Icon name="arrow-left" size="small" />}
+                aria-label={props.language.t("home.projects")}
+                onClick={props.backToProjects}
+              />
+            </TooltipV2>
+            <HomeProjectAvatar project={item().project} class="!size-7 shrink-0" />
+            <div class="flex min-w-0 flex-1 flex-col">
+              <div class="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-5 text-v2-text-text-base [font-weight:600]">
+                {displayName(item().project)}
+              </div>
+              <div
+                class="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] leading-3 text-v2-text-text-muted [font-weight:440]"
+                title={item().project.worktree}
+              >
+                {compactProjectPath(item().project.worktree)}
+              </div>
+            </div>
+          </div>
+          <ScrollView data-slot="home-floating-sessions-scroll" class="min-h-0 min-w-0">
+            <Show
+              when={!props.sessionsLoading}
+              fallback={
+                <div role="status" class="flex h-20 items-center justify-center gap-2 text-v2-text-text-muted">
+                  <Spinner class="size-3.5" />
+                  <span class="text-[12px]">{props.language.t("common.loading")}</span>
+                </div>
+              }
+            >
+              <Show
+                when={!props.sessionsFailed}
+                fallback={
+                  <div class="flex h-20 items-center justify-center px-4 text-center text-[12px] text-v2-text-text-muted">
+                    {props.language.t("common.requestFailed")}
+                  </div>
+                }
+              >
+                <Show
+                  when={props.sessions.length > 0}
+                  fallback={
+                    <div class="flex h-20 items-center justify-center px-4 text-center text-[12px] text-v2-text-text-muted">
+                      {props.language.t("home.sessions.empty")}
+                    </div>
+                  }
+                >
+                  <div class="flex min-w-0 flex-col gap-1 pb-1">
+                    <For each={props.sessions}>
+                      {(session) => {
+                        const title = () => {
+                          const value = sessionTitle(session.title)
+                          if (!value || value.length > 240) return props.language.t("command.session.new")
+                          return value
+                        }
+                        return (
+                          <button
+                            type="button"
+                            data-component="home-floating-session-row"
+                            class={`${HOME_PROJECT_NAV_ROW} !h-12 !gap-2 !px-2.5`}
+                            aria-label={title()}
+                            onClick={() => props.openPanelSession(session)}
+                          >
+                            <IconV2 name="speech-bubble" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+                            <span class="flex min-w-0 flex-1 flex-col text-left">
+                              <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[12px] leading-5 text-v2-text-text-base [font-weight:530]">
+                                {title()}
+                              </span>
+                              <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[10px] leading-3 text-v2-text-text-muted [font-weight:440]">
+                                {DateTime.fromMillis(session.time.updated ?? session.time.created).toLocaleString(
+                                  DateTime.DATETIME_SHORT,
+                                )}
+                              </span>
+                            </span>
+                          </button>
+                        )
+                      }}
+                    </For>
+                  </div>
+                </Show>
+              </Show>
+            </Show>
+          </ScrollView>
+        </div>
+      )}
+    </Show>
   )
 }
 
@@ -671,6 +1579,7 @@ function HomeProjectColumn(props: {
   recentlyClosed: LocalProject[]
   homedir: string
   selected: HomeProjectSelection
+  usage: Record<string, ProjectUsage>
   focusServer: (server: ServerConnection.Any) => void
   selectProject: (server: ServerConnection.Any, directory: string) => void
   openNewSession: (server: ServerConnection.Any, directory: string) => void
@@ -913,6 +1822,7 @@ function HomeProjectList(props: {
   server: ServerConnection.Any
   projects: LocalProject[]
   selected: HomeProjectSelection
+  usage: Record<string, ProjectUsage>
   selectProject: (server: ServerConnection.Any, directory: string) => void
   openNewSession: (server: ServerConnection.Any, directory: string) => void
   editProject: (server: ServerConnection.Any, project: LocalProject) => void
@@ -921,9 +1831,12 @@ function HomeProjectList(props: {
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
   language: ReturnType<typeof useLanguage>
 }) {
+  const projects = createMemo(() =>
+    rankProjectsByUsage(props.projects, ServerConnection.key(props.server), props.usage),
+  )
   return (
     <div class="flex min-w-0 flex-col gap-1">
-      <For each={props.projects}>
+      <For each={projects()}>
         {(project) => (
           <HomeProjectRow
             project={project}
@@ -1051,18 +1964,32 @@ function HomeProjectRow(props: {
     )
   }
   return (
-    <div class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]">
+    <div class="group/project relative flex min-h-14 min-w-0 items-center rounded-[6px]">
       <button
         type="button"
         data-component="home-project-row"
-        class={`${HOME_PROJECT_NAV_ROW} pr-16 disabled:opacity-60`}
+        class={`${HOME_PROJECT_NAV_ROW} !h-14 !gap-3 !pl-2.5 !pr-16 disabled:opacity-60`}
         data-selected={props.selected ? "" : undefined}
         aria-current={props.selected ? "page" : undefined}
+        aria-label={`${displayName(props.project)}, ${compactProjectPath(props.project.worktree)}`}
         disabled={serverUnreachable()}
         onClick={() => props.selectProject(props.server, props.project.worktree)}
       >
-        <HomeProjectAvatar project={props.project} />
-        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
+        <HomeProjectAvatar project={props.project} class="!size-7" />
+        <span class="min-w-0 flex-1 flex flex-col gap-0.5">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] leading-5 text-v2-text-text-base [font-weight:600]">
+            {displayName(props.project)}
+          </span>
+          <span
+            class="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-4 text-v2-text-text-muted [font-weight:440]"
+            title={props.project.worktree}
+          >
+            {compactProjectPath(props.project.worktree)}
+          </span>
+        </span>
+        <Show when={props.selected}>
+          <IconV2 name="check" size="small" class="shrink-0 text-v2-icon-icon-base" />
+        </Show>
       </button>
       <div
         class="hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover/project:opacity-100 focus-within:opacity-100 data-[menu=true]:opacity-100"
@@ -1120,13 +2047,14 @@ function HomeProjectRow(props: {
   )
 }
 
-function HomeProjectAvatar(props: { project: LocalProject; outline?: boolean }) {
+function HomeProjectAvatar(props: { project: LocalProject; outline?: boolean; class?: string }) {
   const name = createMemo(() => displayName(props.project))
   return (
     <ProjectAvatar
       fallback={name()}
       src={props.outline ? undefined : getProjectAvatarSource(props.project.id, props.project.icon)}
       variant={props.outline ? "outline" : getProjectAvatarVariant(props.project.icon?.color)}
+      class={props.class}
     />
   )
 }
